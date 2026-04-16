@@ -25,30 +25,28 @@ class Device(metaclass=helper.Singleton):
         self.vid, self.pid, self.serial_number = self._get_compatible_board_and_reset(serial_number_str)
         if self.serial_number is None:
             raise ValueError("No board found")
+
         time.sleep(1)
+
         self._hid = hid.Device(self.vid, self.pid, self.serial_number)
         device = helper.find_serial_port(self.vid, self.pid, self.serial_number)
         self._serial = serial.Serial(device)
 
-        # --- new synchronization members ---
+        self._irq_event_callbacks = {}
+
         self._response_lock = threading.Lock()
         self._pending_responses = {}
         self._pending_conditions = {}
         self._running = True
 
-
-        self.firmware_version = self._get_firmware_version()
-        # self._report_events_list = []
-        self._irq_event_callbacks = {}
-
-
-        # Start async HID listener
         self._listener_thread = threading.Thread(
             target=self._hid_listener_loop,
             name="u2if-hid-listener",
             daemon=True,
         )
         self._listener_thread.start()
+
+    self.firmware_version = self._get_firmware_version()
 
     def close(self):
         self._running = False
