@@ -19,6 +19,7 @@ protected:
     CmdStatus getPin(uint8_t const *cmd, uint8_t response[64]);
     CmdStatus setIrq(uint8_t const *cmd);
     CmdStatus getIrq(uint8_t const *cmd, uint8_t response[64]);
+    uint8_t copyIrqEvents(uint8_t* dst, uint8_t maxCount);
 private:
     repeating_timer_t _debounceTimer;
 };

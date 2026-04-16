@@ -112,11 +112,26 @@ CmdStatus Gpio::process(uint8_t const *cmd, uint8_t response[64]) {
     return status;
 }
 
-CmdStatus Gpio::task(uint8_t response[64]) {
-    (void)response;
+//CmdStatus Gpio::task(uint8_t response[64]) {
+//    (void)response;
+//
+//    CmdStatus status = CmdStatus::NOT_CONCERNED;
+//    return status;
+//}
 
-    CmdStatus status = CmdStatus::NOT_CONCERNED;
-    return status;
+CmdStatus Gpio::task(uint8_t response[64])
+{
+    const uint8_t maxEventsInResponse = HID_RESPONSE_SIZE - 3;
+    uint8_t count = copyAndClearIrqEvents(&(response[3]), maxEventsInResponse);
+
+    if (count == 0)
+    {
+        return CmdStatus::NOT_CONCERNED;
+    }
+
+    response[0] = Report::ID::GPIO_ASYNC_IRQ;
+    response[2] = count;
+    return CmdStatus::OK;
 }
 
 
@@ -184,23 +199,52 @@ CmdStatus Gpio::setIrq(uint8_t const *cmd) {
 
 // TODO: To rework, it is a simple version with buffer smaller than HID response.
 // It is necessary to be able to have larger buffers. Currently they are the size of the HID response.
-CmdStatus Gpio::getIrq(uint8_t const *cmd, uint8_t response[64]) {
+//CmdStatus Gpio::getIrq(uint8_t const *cmd, uint8_t response[64]) {
+//    (void)cmd;
+//    static uint32_t eventBufferCopy[MAX_BUFFERED_EVENT];
+//    static uint8_t eventBufferCountCopy = 0;
+//
+//    if(eventBufferCountCopy == 0) {
+//        critical_section_enter_blocking(&critSec);
+//        eventBufferCountCopy = irqEventBufferCount;
+//        memcpy(eventBufferCopy, irqEventBuffer, sizeof(uint32_t) * eventBufferCountCopy);
+//        irqEventBufferCount = 0;
+//        critical_section_exit(&critSec);
+//    }
+//
+//    response[2] = eventBufferCountCopy;
+//    memcpy(&(response[3]), eventBufferCopy, sizeof(uint8_t) * eventBufferCountCopy);
+//    eventBufferCountCopy = 0;
+//    return CmdStatus::OK;
+//}
+
+CmdStatus Gpio::getIrq(uint8_t const* cmd, uint8_t response[64])
+{
     (void)cmd;
-    static uint32_t eventBufferCopy[MAX_BUFFERED_EVENT];
-    static uint8_t eventBufferCountCopy = 0;
-
-    if(eventBufferCountCopy == 0) {
-        critical_section_enter_blocking(&critSec);
-        eventBufferCountCopy = irqEventBufferCount;
-        memcpy(eventBufferCopy, irqEventBuffer, sizeof(uint32_t) * eventBufferCountCopy);
-        irqEventBufferCount = 0;
-        critical_section_exit(&critSec);
-    }
-
-    response[2] = eventBufferCountCopy;
-    memcpy(&(response[3]), eventBufferCopy, sizeof(uint8_t) * eventBufferCountCopy);
-    eventBufferCountCopy = 0;
+    const uint8_t maxEventsInResponse = HID_RESPONSE_SIZE - 3;
+    response[2] = copyAndClearIrqEvents(&(response[3]), maxEventsInResponse);
     return CmdStatus::OK;
 }
 
+
+static uint8_t copyAndClearIrqEvents(uint8_t* dst, uint8_t maxCount)
+{
+    uint8_t count = 0;
+    critical_section_enter_blocking(&critSec);
+
+    count = irqEventBufferCount;
+    if (count > maxCount) {
+        count = maxCount;
+    }
+
+    memcpy(dst, irqEventBuffer, sizeof(uint8_t) * count);
+
+    if (irqEventBufferCount > count) {
+        memmove(irqEventBuffer, irqEventBuffer + count, irqEventBufferCount - count);
+    }
+
+    irqEventBufferCount -= count;
+    critical_section_exit(&critSec);
+    return count;
+}
 

@@ -50,6 +50,8 @@ class Device(metaclass=helper.Singleton):
 
     def close(self):
         self._running = False
+        self._listener_thread.join(timeout=1)
+        self._hid.close()
         try:
             self._hid.close()
         except Exception:

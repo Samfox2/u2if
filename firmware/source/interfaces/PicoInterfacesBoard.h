@@ -87,6 +87,10 @@ namespace Report {
         GPIO_SET_IRQ = 0x23,
         // | GPIO_GET_IRQ | => | GPIO_GET_IRQ | CmdStatus::OK | IRQ_NUMBER | IRQ(GP NUMBER[0..5] | EVENT (EVENT_RISING | EVENT_FALLING) [6..7]) * IRQ_NUMBER|
         GPIO_GET_IRQ = 0x24,
+        
+        // | GPIO_ASYNC_IRQ | CmdStatus::OK | IRQ_NUMBER |
+        // IRQ(GP NUMBER[0..5] | EVENT (EVENT_RISING | EVENT_FALLING) [6..7]) * IRQ_NUMBER |
+        GPIO_ASYNC_IRQ = 0x25,
 
         // GROUP GPIO: pins must be initialized separately
         // | GROUP_GPIO_SET_VALUES | GP MASK[4] L.Endian | VALUES[4] (0=LOW; 1=HIGH) L.Endian |
