@@ -174,15 +174,6 @@ class Device(metaclass=helper.Singleton):
         )
         return None
 
-    def send_report(self, report, response=True):
-        self._hid.write(b"\0" + report + b"\0" * (report_const.HID_REPORT_SIZE - len(report)))
-        if response:
-            res = self.read_hid(report[0])
-            if res[1] == report_const.NOT_CONCERNED:
-                raise RuntimeError("Unknown command. Maybe the interface is not enabled in firmware.")
-            return res
-        return None
-
     def read_hid(self, report_id):
         res = self._hid.read(report_const.HID_REPORT_SIZE)
         while res[0] != report_id:
