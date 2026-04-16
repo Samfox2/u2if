@@ -80,7 +80,7 @@ class Device(metaclass=helper.Singleton):
     def get_firmware_version(self):
         return self.firmware_version
 
-        def _hid_listener_loop(self):
+    def _hid_listener_loop(self):
         """
         Block on HID reads and dispatch either:
         - synchronous command responses
@@ -94,10 +94,12 @@ class Device(metaclass=helper.Singleton):
 
                 report_id = res[0]
 
-                if report_id == report_const.GPIO_IRQ_EVENT:
+                # async IRQ handling
+                if report_id == report_const.GPIO_ASYNC_IRQ:
                     self._dispatch_irq_event(res)
                     continue
 
+                # normal response to send_report()
                 with self._response_lock:
                     self._pending_responses[report_id] = res
                     cond = self._pending_conditions.get(report_id)
@@ -105,34 +107,44 @@ class Device(metaclass=helper.Singleton):
                         cond.notify_all()
 
             except Exception:
-                # Optional: log here
+                # optional: logging
                 time.sleep(0.05)
 
     def _dispatch_irq_event(self, res):
         """
-        Proposed event layout:
-            res[0] = GPIO_IRQ_EVENT
-            res[1] = OK
-            res[2] = gpio number
-            res[3] = event flags (EVENT_FALLING / EVENT_RISING)
+        Firmware format:
+            res[0] = GPIO_ASYNC_IRQ
+            res[1] = status
+            res[2] = count
+            res[3..] = packed events
+
+        packed event:
+            lower 6 bits = gpio
+            upper 2 bits = event (RISING/FALLING)
         """
-        if len(res) < 4:
+
+        if len(res) < 3:
             return
 
         status = res[1]
         if status != report_const.OK:
             return
 
-        gpio = res[2]
-        event = res[3]
+        irq_nb = res[2]
 
-        callback = self._irq_event_callbacks.get(gpio)
-        if callback is not None:
-            try:
-                callback(gpio, event=event)
-            except Exception:
-                # Optional: log callback error
-                pass
+        for irq_index in range(3, 3 + irq_nb):
+            ev_key = res[irq_index]
+
+            gpio = ev_key & 0b00111111
+            event = (ev_key >> 6) & 0b00000011
+
+            callback = self._irq_event_callbacks.get(gpio)
+            if callback is not None:
+                try:
+                    callback(gpio, event=event)
+                except Exception:
+                    # optional: log error
+                    pass
 
     def send_report(self, report, response=True, timeout=2.0):
         report_id = report[0]
