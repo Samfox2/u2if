@@ -1,4 +1,5 @@
 import time
+import threading
 import hid
 import serial
 from . import helper
@@ -28,9 +29,33 @@ class Device(metaclass=helper.Singleton):
         self._hid = hid.Device(self.vid, self.pid, self.serial_number)
         device = helper.find_serial_port(self.vid, self.pid, self.serial_number)
         self._serial = serial.Serial(device)
+
+        # --- new synchronization members ---
+        self._response_lock = threading.Lock()
+        self._pending_responses = {}
+        self._pending_conditions = {}
+        self._running = True
+
+
         self.firmware_version = self._get_firmware_version()
         # self._report_events_list = []
         self._irq_event_callbacks = {}
+
+
+        # Start async HID listener
+        self._listener_thread = threading.Thread(
+            target=self._hid_listener_loop,
+            name="u2if-hid-listener",
+            daemon=True,
+        )
+        self._listener_thread.start()
+
+    def close(self):
+        self._running = False
+        try:
+            self._hid.close()
+        except Exception:
+            pass
 
     def _reset(self):
         res = self.send_report(bytes([report_const.SYS_RESET]), response=True)
@@ -54,6 +79,100 @@ class Device(metaclass=helper.Singleton):
 
     def get_firmware_version(self):
         return self.firmware_version
+
+        def _hid_listener_loop(self):
+        """
+        Block on HID reads and dispatch either:
+        - synchronous command responses
+        - asynchronous GPIO IRQ events
+        """
+        while self._running:
+            try:
+                res = self._hid.read(report_const.HID_REPORT_SIZE)
+                if not res:
+                    continue
+
+                report_id = res[0]
+
+                if report_id == report_const.GPIO_IRQ_EVENT:
+                    self._dispatch_irq_event(res)
+                    continue
+
+                with self._response_lock:
+                    self._pending_responses[report_id] = res
+                    cond = self._pending_conditions.get(report_id)
+                    if cond is not None:
+                        cond.notify_all()
+
+            except Exception:
+                # Optional: log here
+                time.sleep(0.05)
+
+    def _dispatch_irq_event(self, res):
+        """
+        Proposed event layout:
+            res[0] = GPIO_IRQ_EVENT
+            res[1] = OK
+            res[2] = gpio number
+            res[3] = event flags (EVENT_FALLING / EVENT_RISING)
+        """
+        if len(res) < 4:
+            return
+
+        status = res[1]
+        if status != report_const.OK:
+            return
+
+        gpio = res[2]
+        event = res[3]
+
+        callback = self._irq_event_callbacks.get(gpio)
+        if callback is not None:
+            try:
+                callback(gpio, event=event)
+            except Exception:
+                # Optional: log callback error
+                pass
+
+    def send_report(self, report, response=True, timeout=2.0):
+        report_id = report[0]
+
+        if response:
+            with self._response_lock:
+                if report_id not in self._pending_conditions:
+                    self._pending_conditions[report_id] = threading.Condition(
+                        self._response_lock
+                    )
+                cond = self._pending_conditions[report_id]
+
+                self._pending_responses.pop(report_id, None)
+
+                self._hid.write(
+                    b"\0"
+                    + report
+                    + b"\0" * (report_const.HID_REPORT_SIZE - len(report))
+                )
+
+                end_time = time.monotonic() + timeout
+                while report_id not in self._pending_responses:
+                    remaining = end_time - time.monotonic()
+                    if remaining <= 0:
+                        raise TimeoutError(f"Timeout waiting for response 0x{report_id:02X}")
+                    cond.wait(timeout=remaining)
+
+                res = self._pending_responses.pop(report_id)
+
+            if res[1] == report_const.NOT_CONCERNED:
+                raise RuntimeError(
+                    "Unknown command. Maybe the interface is not enabled in firmware."
+                )
+
+            return res
+
+        self._hid.write(
+            b"\0" + report + b"\0" * (report_const.HID_REPORT_SIZE - len(report))
+        )
+        return None
 
     def send_report(self, report, response=True):
         self._hid.write(b"\0" + report + b"\0" * (report_const.HID_REPORT_SIZE - len(report)))
